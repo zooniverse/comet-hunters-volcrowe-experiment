@@ -8,16 +8,27 @@ import os
 import time
 import json
 import numpy
+import matplotlib.pyplot as plt
+import pickle
+
+OUTLIER_LOW_CUTOFF = 1
+OUTLIER_HIGH_CUTOFF = 100
+NUMBER_OF_HISTOGRAM_BINS = 25
+
+if len(sys.argv) > 1 and sys.argv[1]=="skip":
+  skip_analysis=True
+else:
+  skip_analysis=False
 
 def restart_line():
   sys.stdout.write('\r')
   sys.stdout.flush()
 
-def get_user_classification_counts(classifications_by_user):
-  counts_of_classifications_per_user = {}
-  for user in classifications_by_user:
-    counts_of_classifications_per_user[user] = len(classifications_by_user[user])
-  return counts_of_classifications_per_user
+def get_user_session_classification_counts(classifications_by_user_session):
+  counts_of_classifications_per_user_session = {}
+  for user_session_id in classifications_by_user_session:
+    counts_of_classifications_per_user_session[user_session_id] = len(classifications_by_user_session[user_session_id])
+  return counts_of_classifications_per_user_session
 
 def get_headers_with_indices(headers):
   s = "Available columns:\n"
@@ -39,81 +50,113 @@ def get_user_session_id(user_name, session):
 def get_nice_now():
   return datetime.now().strftime('%H:%M:%S')
 
-print "\nScanning classifications CSV (started at %s)...\n" % get_nice_now()
+if not skip_analysis:
 
-classifications_analysed = 0
-filename = 'data/comet-hunters-classifications.csv'
-total = sum(1 for line in open(filename)) - 1
-classifications = csv.reader(open(filename, 'rU'), dialect=csv.excel_tab, delimiter=',', quotechar='"')
-headers = classifications.next()
+  print "\nScanning classifications CSV (started at %s)...\n" % get_nice_now()
 
-metadata_field_index = headers.index("metadata")
-user_name_field_index = headers.index("user_name")
-classification_id_field_index = headers.index("classification_id")
+  classifications_analysed = 0
+  filename = 'data/comet-hunters-classifications.csv'
+  total = sum(1 for line in open(filename)) - 1
+  classifications = csv.reader(open(filename, 'rU'), dialect=csv.excel_tab, delimiter=',', quotechar='"')
+  headers = classifications.next()
 
-print get_headers_with_indices(headers)
+  metadata_field_index = headers.index("metadata")
+  user_name_field_index = headers.index("user_name")
+  classification_id_field_index = headers.index("classification_id")
 
-metadata_fields = []
-classifications_by_user = {}
-skipped_due_to_no_session_set = 0
+  print get_headers_with_indices(headers)
 
-print "Total classifications (data rows) in CSV: %s\n" % total
+  metadata_fields = []
+  classifications_by_user_session = {}
+  skipped_due_to_no_session_set = 0
 
-for classification in classifications:
-  skip_this_one = False
-  classifications_analysed += 1
-  if classifications_analysed % 1000 == 0:
-    restart_line()
-    pc = int(100*(float(classifications_analysed)/float(total)))
-    sys.stdout.write("%s - %s classifications examined (%s%%)..." % (get_nice_now(), classifications_analysed, pc))
-  if metadata_field_index > 0:
-    metadata = json.loads(classification[metadata_field_index])
-    for field in metadata:
-      if field not in metadata_fields:
-        metadata_fields.append(field)
-    if "session" not in metadata:
-      skipped_due_to_no_session_set += 1
-      skip_this_one = True
-  if not skip_this_one and classification_id_field_index > -1:
-    if user_name_field_index > -1:
-      user_name = classification[user_name_field_index]
-      if user_name not in classifications_by_user:
-        classifications_by_user[user_name]=[]
-      classification_id = classification[classification_id_field_index]
-      classifications_by_user[user_name].append(classification_id)
-  if classifications_analysed < total:
-    sys.stdout.flush()
-  #day_of_this_classification = datetime.strptime(classification[4].split(' ')[0], '%Y-%m-%d')
+  print "Total classifications (data rows) in CSV: %s\n" % total
 
-print "\n\nProcessed a total of %s classifications (Finished at %s).\n" % (classifications_analysed, get_nice_now())
+  for classification in classifications:
+    skip_this_one = False
+    classifications_analysed += 1
+    if classifications_analysed % 1000 == 0:
+      restart_line()
+      pc = int(100*(float(classifications_analysed)/float(total)))
+      sys.stdout.write("%s - %s classifications examined (%s%%)..." % (get_nice_now(), classifications_analysed, pc))
+    if metadata_field_index > 0:
+      metadata = json.loads(classification[metadata_field_index])
+      for field in metadata:
+        if field not in metadata_fields:
+          metadata_fields.append(field)
+          if field == "session":
+            session_id = metadata["session"]
+      if "session" not in metadata:
+        skipped_due_to_no_session_set += 1
+        skip_this_one = True
+    if not skip_this_one and classification_id_field_index > -1:
+      if user_name_field_index > -1:
+        user_name = classification[user_name_field_index]
+        user_session_id = get_user_session_id(user_name, session_id)
+        if user_session_id not in classifications_by_user_session:
+          classifications_by_user_session[user_session_id]=[]
+        classification_id = classification[classification_id_field_index]
+        classifications_by_user_session[user_session_id].append(classification_id)
+    if classifications_analysed < total:
+      sys.stdout.flush()
+    #day_of_this_classification = datetime.strptime(classification[4].split(' ')[0], '%Y-%m-%d')
 
-print get_field_list(metadata_fields, metadata_field_index)
+  print "\n\nProcessed a total of %s classifications (Finished at %s).\n" % (classifications_analysed, get_nice_now())
 
-skipped_pc = float(skipped_due_to_no_session_set)/float(total)
+  print get_field_list(metadata_fields, metadata_field_index)
 
-print "\nClassifications skipped due to no session set: %s [%s%% of total]\n" % (skipped_due_to_no_session_set, skipped_pc)
+  skipped_pc = float(skipped_due_to_no_session_set)/float(total)
 
-classification_counts = get_user_classification_counts(classifications_by_user)
-max_classifications_per_user = numpy.max(classification_counts.values())
+  print "Classifications skipped due to no session set: %s [%s%% of total]\n" % (skipped_due_to_no_session_set, skipped_pc)
 
-original_no_of_users = len(classification_counts)
+  classification_session_counts = get_user_session_classification_counts(classifications_by_user_session)
+  original_no_of_user_sessions = len(classification_session_counts)
 
-oners = 0
-for user in classification_counts.keys():
-  if classification_counts[user] == 1:
-    oners += 1
-    #del classification_counts[user]
+  low_ones = 0
+  for user_session_id in classification_session_counts.keys():
+    if classification_session_counts[user_session_id] <= OUTLIER_LOW_CUTOFF:
+      low_ones += 1
+      del classification_session_counts[user_session_id]
 
-average_classifications_per_user = numpy.mean(classification_counts.values())
+  big_ones = 0
+  for user_session_id in classification_session_counts.keys():
+    if classification_session_counts[user_session_id] >= OUTLIER_HIGH_CUTOFF:
+      big_ones += 1
+      del classification_session_counts[user_session_id]
 
-no_of_users = len(classification_counts)
+  average_classifications_per_user_session = numpy.mean(classification_session_counts.values())
+  max_classifications_per_user_session = numpy.max(classification_session_counts.values())
+  no_of_user_sessions = len(classification_session_counts)
 
-print "Determined classification counts per user for %s users (of which %s only did 1): " \
-      "maximum %s, average %s classifications made over all time." % (no_of_users, oners,
-                                                       max_classifications_per_user,
-                                                       average_classifications_per_user)
+  print "Determined classification counts per user session for %s user sessions from an initial %s ..." % \
+        (no_of_user_sessions, original_no_of_user_sessions)
+  print " - %s had less than or equal to %s classification(s) and were deleted as outliers." % (low_ones,
+                                                                                                OUTLIER_LOW_CUTOFF)
+  print " - %s had equal to or more than %s classifications and were deleted as outliers." % (big_ones,
+                                                                                              OUTLIER_HIGH_CUTOFF)
+  print " - of those remaining, the maximum session length was %s." % max_classifications_per_user_session
+  print " - of those remaining, the average session length was %s." % average_classifications_per_user_session
 
+  print "\nSaving analysis to file...\n"
+  pickle.dump([classification_session_counts,max_classifications_per_user_session], open('temp-data.p', 'wb'))
 
+if 'classification_session_counts' not in vars() and 'max_classifications_per_user_session' not in vars():
+  print "Loading analysis from last time..."
+  [classification_session_counts, max_classifications_per_user_session] = pickle.load(open('temp-data.p', "rb"))
+
+print "\nWriting histogram to graphs/session-length-histogram.png ..."
+step = int(float(max_classifications_per_user_session) / float(NUMBER_OF_HISTOGRAM_BINS))
+bins = numpy.arange(0, max_classifications_per_user_session, step)
+session_lengths = classification_session_counts.values()
+plt.hist(session_lengths, bins=bins)
+plt.xticks(bins)
+locs, labels = plt.xticks()
+plt.setp(labels, rotation=90)
+plt.xlabel('Session Length', fontsize=16)
+plt.ylabel('Number of User Sessions of this Length', fontsize=16)
+plt.savefig('graphs/session-length-histogram.png')
+plt.clf()
+plt.close()
 
 #wrfile = open("output/subjects_activity.csv", 'w')
 
