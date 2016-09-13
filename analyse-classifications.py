@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 __author__ = 'alex'
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import unicodecsv as csv
 import sys
 import os
@@ -46,7 +46,7 @@ def get_field_list(field_array, column_index):
 
 def getWeekNumber(dateString):
   (y, m, d) = [int(i) for i in dateString.split("-")]
-  return datetime.date(y,m,d).isocalendar()[1]
+  return date(y,m,d).isocalendar()[1]
 
 def averageLen(lst):
   lengths = [len(i) for i in lst]
@@ -79,6 +79,7 @@ if not skip_analysis:
   skipped_due_to_no_session_set = 0
   classifications_by_day = {}
   classifications_by_week = {}
+  classifications_by_user = {}
   users_by_day = {}
   users_by_week = {}
 
@@ -93,43 +94,47 @@ if not skip_analysis:
       sys.stdout.write("%s - %s classifications examined (%s%%)..." % (get_nice_now(), classifications_analysed, pc))
     if metadata_field_index > 0:
       metadata = json.loads(classification[metadata_field_index])
-      for field in metadata.keys():
+      for field in metadata:
         if field not in metadata_fields:
           metadata_fields.append(field)
-      if "session" in metadata.keys():
+      if "session" in metadata:
         session_id = metadata["session"]
       else:
         skipped_due_to_no_session_set += 1
         skip_this_one = True
-      if "finished_at" in metadata.keys():
-        finished_at = metadata["finished_at"]
-        date_of_this_classification = finished_at[:10]
-        if date_of_this_classification in classifications_by_day.keys():
+      if "finished_at" in metadata:
+        finished_at = metadata["finished_at"][:10]
+        date_of_this_classification = finished_at
+        if date_of_this_classification in classifications_by_day:
           classifications_by_day[date_of_this_classification] += 1
         else:
           classifications_by_day[date_of_this_classification] = 1
         weekNum = getWeekNumber(finished_at)
-        if weekNum in classifications_by_week.keys():
+        if weekNum in classifications_by_week:
           classifications_by_week[weekNum] += 1
         else:
           classifications_by_week[weekNum] = 1
         if user_name_field_index > -1:
           user_name = classification[user_name_field_index]
-          if date_of_this_classification in users_by_day.keys():
+          if date_of_this_classification in users_by_day:
             if user_name not in users_by_day[date_of_this_classification]:
               users_by_day[date_of_this_classification].append(user_name)
           else:
             users_by_day[date_of_this_classification] = [user_name]
-          if weekNum in users_by_week.keys():
+          if weekNum in users_by_week:
             if user_name not in users_by_week[weekNum]:
               users_by_week[weekNum].append(user_name)
           else:
             users_by_week[weekNum] = [user_name]
+          if user_name not in classifications_by_user:
+            classifications_by_user[user_name] = 1
+          else:
+            classifications_by_user[user_name] += 1
     if not skip_this_one and classification_id_field_index > -1:
       if user_name_field_index > -1:
         user_name = classification[user_name_field_index]
         user_session_id = get_user_session_id(user_name, session_id)
-        if user_session_id not in classifications_by_user_session.keys():
+        if user_session_id not in classifications_by_user_session:
           classifications_by_user_session[user_session_id]=[]
         classification_id = classification[classification_id_field_index]
         classifications_by_user_session[user_session_id].append(classification_id)
@@ -167,6 +172,7 @@ if not skip_analysis:
   average_classifications_per_week = numpy.mean(classifications_by_week.values())
   average_users_per_day = averageLen(users_by_day.values())
   average_users_per_week = averageLen(users_by_week.values())
+  average_classifications_per_user = numpy.mean(classifications_by_user.values())
 
   print "Determined classification counts per user session for %s user sessions from an initial %s ..." % \
         (no_of_user_sessions, original_no_of_user_sessions)
@@ -181,8 +187,9 @@ if not skip_analysis:
   print " - of those remaining, the average classifications per week was %s." % average_classifications_per_week
   print " - of those remaining, the average users per day was %s." % average_users_per_day
   print " - of those remaining, the average users per week was %s." % average_users_per_week
+  print " - of those remaining, the average classifications per user was %s." % average_classifications_per_user
 
-  print "\nSaving analysis to file...\n"
+  print "\nSaving analysis to file..."
   pickle.dump([classification_session_counts,max_classifications_per_user_session], open('temp-data.p', 'wb'))
 
 if 'classification_session_counts' not in vars() and 'max_classifications_per_user_session' not in vars():
